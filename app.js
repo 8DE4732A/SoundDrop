@@ -12,9 +12,9 @@
 
     // 初始化 Quiet.js
     Quiet.init({
-        profilesPrefix: "example/",
-        memoryInitializerPrefix: "example/",
-        libfecPrefix: "example/"
+        profilesPrefix: "/",
+        memoryInitializerPrefix: "/",
+        libfecPrefix: "/"
     });
 
     // 全局变量
