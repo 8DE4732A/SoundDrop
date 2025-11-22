@@ -273,6 +273,26 @@ h1 {
     color: #667eea;
 }
 
+/* 波形图样式 */
+.waveform-container {
+    margin-top: 20px;
+    padding: 15px;
+    background: #1a1a2e;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.waveform-container.hidden {
+    display: none;
+}
+
+#waveform-canvas {
+    width: 100%;
+    height: 120px;
+    display: block;
+    border-radius: 8px;
+}
+
 @media (max-width: 600px) {
     .container {
         padding: 30px 20px;

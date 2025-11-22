@@ -7,6 +7,12 @@ let receivedData = null;
 let isReceiving = false;
 let mediaStream = null;
 
+// 波形图相关变量
+let analyser = null;
+let waveformAnimationId = null;
+let waveformCanvas = null;
+let waveformCtx = null;
+
 // 文件传输配置
 const MAX_FILE_SIZE = 100 * 1024; // 100KB
 const CHUNK_SIZE = 64; // 每个数据包的字节数
@@ -247,7 +253,12 @@ async function startReceiving() {
             }
         };
 
-        source.connect(processor);
+        // 启动波形图（在连接音频链路之前）
+        startWaveform();
+
+        // 连接音频链路: source -> analyser -> processor -> destination
+        source.connect(analyser);
+        analyser.connect(processor);
         processor.connect(audioContext.destination);
 
         // 保存引用以便清理
@@ -264,6 +275,9 @@ async function startReceiving() {
 // 停止接收函数
 function stopReceiving() {
     isReceiving = false;
+
+    // 停止波形图
+    stopWaveform();
 
     if (mediaStream) {
         mediaStream.getTracks().forEach(track => track.stop());
@@ -402,6 +416,130 @@ function formatFileSize(bytes) {
 // 延迟函数
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// 初始化波形图 Canvas
+function initWaveformCanvas() {
+    waveformCanvas = document.getElementById('waveform-canvas');
+    waveformCtx = waveformCanvas.getContext('2d');
+
+    // 设置 Canvas 实际尺寸（高分辨率）
+    const container = document.getElementById('waveform-container');
+    const dpr = window.devicePixelRatio || 1;
+
+    // 使用固定宽度或容器宽度
+    const width = container.clientWidth - 30 || 400; // 减去 padding
+    const height = 120;
+
+    waveformCanvas.width = width * dpr;
+    waveformCanvas.height = height * dpr;
+
+    // 设置 CSS 尺寸
+    waveformCanvas.style.width = width + 'px';
+    waveformCanvas.style.height = height + 'px';
+
+    console.log('Canvas initialized:', width, 'x', height, 'dpr:', dpr);
+}
+
+// 绘制波形图
+function drawWaveform() {
+    if (!analyser || !waveformCtx || !isReceiving) return;
+
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    analyser.getByteTimeDomainData(dataArray);
+
+    const dpr = window.devicePixelRatio || 1;
+    const width = waveformCanvas.width / dpr;
+    const height = waveformCanvas.height / dpr;
+
+    // 重置变换并清除画布
+    waveformCtx.setTransform(1, 0, 0, 1, 0, 0);
+    waveformCtx.scale(dpr, dpr);
+
+    // 清除画布
+    waveformCtx.fillStyle = '#1a1a2e';
+    waveformCtx.fillRect(0, 0, width, height);
+
+    // 重置阴影
+    waveformCtx.shadowBlur = 0;
+    waveformCtx.shadowColor = 'transparent';
+
+    // 绘制中心线
+    waveformCtx.strokeStyle = 'rgba(102, 126, 234, 0.3)';
+    waveformCtx.lineWidth = 1;
+    waveformCtx.beginPath();
+    waveformCtx.moveTo(0, height / 2);
+    waveformCtx.lineTo(width, height / 2);
+    waveformCtx.stroke();
+
+    // 设置波形样式
+    waveformCtx.lineWidth = 2;
+    waveformCtx.strokeStyle = '#667eea';
+    waveformCtx.shadowBlur = 8;
+    waveformCtx.shadowColor = '#667eea';
+
+    // 绘制波形
+    waveformCtx.beginPath();
+
+    const sliceWidth = width / bufferLength;
+    let x = 0;
+
+    for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 128.0;
+        const y = (v * height) / 2;
+
+        if (i === 0) {
+            waveformCtx.moveTo(x, y);
+        } else {
+            waveformCtx.lineTo(x, y);
+        }
+
+        x += sliceWidth;
+    }
+
+    waveformCtx.stroke();
+
+    // 继续动画
+    waveformAnimationId = requestAnimationFrame(drawWaveform);
+}
+
+// 启动波形图
+function startWaveform() {
+    // 创建分析器节点
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.8;
+
+    // 注意: 音频链路连接在 startReceiving 函数中完成
+    // source -> analyser -> processor -> destination
+
+    // 显示波形图容器
+    document.getElementById('waveform-container').classList.remove('hidden');
+
+    // 延迟一帧确保 DOM 更新完成后再初始化 Canvas
+    requestAnimationFrame(() => {
+        // 初始化 Canvas
+        initWaveformCanvas();
+        // 开始绘制
+        drawWaveform();
+    });
+}
+
+// 停止波形图
+function stopWaveform() {
+    if (waveformAnimationId) {
+        cancelAnimationFrame(waveformAnimationId);
+        waveformAnimationId = null;
+    }
+
+    if (analyser) {
+        analyser.disconnect();
+        analyser = null;
+    }
+
+    // 隐藏波形图容器
+    document.getElementById('waveform-container').classList.add('hidden');
 }
 
 // 页面加载完成后初始化
