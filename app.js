@@ -47,7 +47,8 @@
         receivedFileName: document.getElementById('receivedFileName'),
         receivedFileSize: document.getElementById('receivedFileSize'),
         downloadBtn: document.getElementById('downloadBtn'),
-        warning: document.getElementById('warning')
+        warning: document.getElementById('warning'),
+        debugInfo: document.getElementById('debugInfo')
     };
 
     // 工具函数
@@ -183,9 +184,11 @@
             chunks: totalChunks
         };
 
+        console.log('发送元数据:', metadata);
         elements.sendProgressText.textContent = '正在发送文件信息...';
         await sendPacket(metadata);
-        await sleep(500); // 给接收方一点时间处理元数据
+        console.log('元数据已发送');
+        await sleep(2000); // 给接收方足够时间处理元数据
 
         // 发送数据块
         for (let i = 0; i < chunks.length; i++) {
@@ -200,7 +203,7 @@
             elements.sendProgressText.textContent = `发送中... ${i + 1}/${totalChunks} (${progress}%)`;
 
             await sendPacket(packet);
-            await sleep(100); // 给接收方一点时间处理
+            await sleep(200); // 给接收方足够时间处理每个数据块
         }
 
         // 发送结束标记
@@ -233,11 +236,14 @@
                     combined.set(headerBytes, 0);
                     combined.set(new Uint8Array(packet.data), headerBytes.length);
 
+                    console.log(`发送数据块 ${packet.index}, 大小: ${combined.buffer.byteLength} 字节`);
                     transmitter.transmit(combined.buffer, resolve);
                 } else {
+                    console.log('发送数据包类型:', packet.type === PACKET_TYPE.METADATA ? 'METADATA' : 'END');
                     transmitter.transmit(Quiet.str2ab(json), resolve);
                 }
             } catch (error) {
+                console.error('发送数据包失败:', error);
                 reject(error);
             }
         });
@@ -250,44 +256,107 @@
     // 初始化发送器
     function initTransmitter() {
         return new Promise((resolve, reject) => {
+            console.log('初始化发送器...');
             const profileName = document.querySelector('[data-quiet-profile-name]').getAttribute('data-quiet-profile-name');
+            console.log('使用配置:', profileName);
 
             transmitter = Quiet.transmitter({
                 profile: profileName,
                 onFinish: () => {
-                    // 传输完成
+                    console.log('发送器传输完成回调');
                 }
             });
 
+            console.log('发送器已创建');
             setTimeout(resolve, 500);
         });
     }
 
     // 初始化接收器
     function initReceiver() {
-        const profileName = document.querySelector('[data-quiet-profile-name]').getAttribute('data-quiet-profile-name');
+        if (receiver) {
+            console.log('接收器已存在，跳过初始化');
+            updateDebugInfo('接收器已运行');
+            return;
+        }
 
-        receiver = Quiet.receiver({
-            profile: profileName,
-            onReceive: onReceivePacket,
-            onCreateFail: (reason) => {
-                console.error('接收器创建失败:', reason);
-                showWarning('无法访问麦克风，请检查权限设置');
-            },
-            onReceiveFail: (numFails) => {
-                console.log('接收失败次数:', numFails);
-            }
-        });
+        console.log('=== 开始初始化接收器 ===');
+        updateDebugInfo('正在初始化接收器...');
+
+        const profileName = document.querySelector('[data-quiet-profile-name]').getAttribute('data-quiet-profile-name');
+        console.log('使用配置:', profileName);
+
+        // 检查 Quiet 是否已就绪
+        if (typeof Quiet === 'undefined') {
+            console.error('Quiet.js 未加载！');
+            showWarning('音频库未加载，请刷新页面');
+            updateDebugInfo('错误：Quiet.js 未加载');
+            return;
+        }
+
+        try {
+            receiver = Quiet.receiver({
+                profile: profileName,
+                onReceive: onReceivePacket,
+                onCreateFail: (reason) => {
+                    console.error('!!! 接收器创建失败 !!!');
+                    console.error('失败原因:', reason);
+                    showWarning('无法访问麦克风，请检查权限设置');
+                    elements.receiverStatus.textContent = '麦克风访问失败';
+                    updateDebugInfo('错误：' + reason);
+                },
+                onReceiveFail: (numFails) => {
+                    console.warn('接收失败次数:', numFails);
+                    updateDebugInfo('接收失败 ' + numFails + ' 次');
+                }
+            });
+
+            console.log('✓ 接收器对象已创建:', receiver);
+            console.log('✓ 等待接收数据...');
+            elements.receiverStatus.textContent = '等待接收文件...（麦克风已就绪）';
+            updateDebugInfo('接收器就绪，等待数据...');
+
+            // 定期检查接收器状态
+            let statusCheckCount = 0;
+            setInterval(() => {
+                if (receiver) {
+                    statusCheckCount++;
+                    console.log('[接收器状态] 运行中，等待数据... (检查次数:' + statusCheckCount + ')');
+                    updateDebugInfo('运行中 - 检查 ' + statusCheckCount + ' 次');
+                }
+            }, 10000); // 每10秒输出一次状态
+        } catch (error) {
+            console.error('创建接收器时出错:', error);
+            showWarning('接收器初始化失败: ' + error.message);
+            updateDebugInfo('错误：' + error.message);
+        }
+    }
+
+    // 更新调试信息
+    function updateDebugInfo(message) {
+        if (elements.debugInfo) {
+            const timestamp = new Date().toLocaleTimeString();
+            elements.debugInfo.textContent = `[${timestamp}] ${message}`;
+        }
     }
 
     // 接收数据包
     function onReceivePacket(payload) {
+        console.log('========================================');
+        console.log('!!! 收到数据包 !!!');
+        console.log('数据包大小:', payload.byteLength, '字节');
+        console.log('========================================');
+
+        updateDebugInfo('收到数据包 ' + payload.byteLength + ' 字节');
+
         try {
             // 尝试解析为文本
             const text = Quiet.ab2str(payload);
+            console.log('数据包内容预览:', text.substring(0, 100));
 
             // 检查是否包含分隔符（数据包）
             if (text.includes('|') && text.startsWith('{"type":1')) {
+                console.log('检测到数据块包');
                 // 这是一个数据包
                 const separatorIndex = text.indexOf('|');
                 const headerText = text.substring(0, separatorIndex);
@@ -301,19 +370,27 @@
             } else {
                 // 这是元数据或结束标记
                 const packet = JSON.parse(text);
+                console.log('收到数据包，类型:', packet.type);
 
                 if (packet.type === PACKET_TYPE.METADATA) {
+                    console.log('!!! 收到元数据包 !!!:', packet);
+                    updateDebugInfo('收到文件: ' + packet.name);
                     handleMetadataPacket(packet);
                 } else if (packet.type === PACKET_TYPE.END) {
+                    console.log('!!! 收到结束包 !!!');
+                    updateDebugInfo('文件接收完成');
                     handleEndPacket();
                 }
             }
         } catch (error) {
             console.error('解析数据包失败:', error);
+            console.error('原始数据:', payload);
+            updateDebugInfo('解析错误: ' + error.message);
         }
     }
 
     function handleMetadataPacket(packet) {
+        console.log('处理元数据:', packet.name, packet.size, '字节,', packet.chunks, '个数据块');
         fileMetadata = {
             name: packet.name,
             type: packet.fileType,
@@ -327,13 +404,19 @@
         elements.receiverStatus.textContent = `正在接收: ${packet.name}`;
         showElement(elements.receiveProgress);
         hideElement(elements.receivedFile);
+        console.log('已准备接收', packet.chunks, '个数据块');
     }
 
     function handleDataPacket(index, data) {
-        if (!fileMetadata) return;
+        if (!fileMetadata) {
+            console.warn('收到数据块但没有元数据，索引:', index);
+            return;
+        }
 
         receivedChunks[index] = data;
         receivedChunkCount++;
+
+        console.log(`收到数据块 ${index}, 进度: ${receivedChunkCount}/${fileMetadata.chunks}`);
 
         const progress = (receivedChunkCount / fileMetadata.chunks * 100).toFixed(0);
         elements.receiveProgressBar.style.width = progress + '%';
@@ -341,8 +424,12 @@
     }
 
     function handleEndPacket() {
-        if (!fileMetadata) return;
+        if (!fileMetadata) {
+            console.warn('收到结束包但没有元数据');
+            return;
+        }
 
+        console.log('文件接收完成，共', receivedChunkCount, '个数据块');
         elements.receiveProgressText.textContent = '接收完成！';
         elements.receivedFileName.textContent = fileMetadata.name;
         elements.receivedFileSize.textContent = formatFileSize(fileMetadata.size);
@@ -356,11 +443,22 @@
 
     // Quiet.js 就绪回调
     function onQuietReady() {
+        console.log('========================================');
         console.log('Quiet.js 已就绪');
+        console.log('========================================');
+
+        // 检查当前是否在接收标签页，如果是则自动初始化接收器
+        const receiveTab = document.getElementById('receive');
+        if (receiveTab && receiveTab.classList.contains('active')) {
+            console.log('当前在接收标签页，自动初始化接收器');
+            setTimeout(initReceiver, 500); // 延迟一下确保 DOM 就绪
+        }
     }
 
     function onQuietFail(reason) {
+        console.error('========================================');
         console.error('Quiet.js 初始化失败:', reason);
+        console.error('========================================');
         showWarning('音频系统初始化失败: ' + reason);
     }
 
