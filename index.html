@@ -14,6 +14,7 @@
         <div class="tabs">
             <button class="tab active" data-tab="send">发送文件</button>
             <button class="tab" data-tab="receive">接收文件</button>
+            <button class="tab" data-tab="about">项目说明</button>
         </div>
 
         <!-- 发送面板 -->
@@ -82,6 +83,132 @@
                     <div><strong>大小:</strong> <span id="received-size"></span></div>
                 </div>
                 <button id="download-btn" class="btn btn-success">下载文件</button>
+            </div>
+        </div>
+
+        <!-- 项目说明面板 -->
+        <div id="about-panel" class="panel">
+            <div class="about-content">
+                <h2>项目简介</h2>
+                <p>SoundDrop 是一个通过声音传输文件的 Web 应用。它使用 <strong>ggwave.js</strong> 库将数据编码为可听见的音频信号,实现设备间的面对面文件传输,无需网络连接。</p>
+
+                <h3>核心技术</h3>
+                <ul>
+                    <li><strong>ggwave.js v0.4.0</strong>: 数据与音频信号的编解码引擎</li>
+                    <li><strong>Web Audio API</strong>: 音频生成与播放 (48000 Hz 采样率)</li>
+                    <li><strong>MediaDevices API</strong>: 麦克风音频采集</li>
+                    <li><strong>ScriptProcessorNode</strong>: 实时音频处理 (4096 样本缓冲)</li>
+                    <li><strong>AnalyserNode</strong>: 实时波形可视化</li>
+                </ul>
+
+                <h3>传输原理</h3>
+                <div class="flow-diagram">
+                    <div class="flow-step">
+                        <div class="flow-number">1</div>
+                        <div class="flow-desc">
+                            <strong>文件分块</strong><br>
+                            文件被分割成 64 字节的小块,并进行 Base64 编码
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-number">2</div>
+                        <div class="flow-desc">
+                            <strong>协议封装</strong><br>
+                            首先发送包含文件名、大小、类型的头部信息<br>
+                            <code>HEADER|||{"name":"file.txt","size":1024,...}</code>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-number">3</div>
+                        <div class="flow-desc">
+                            <strong>音频编码</strong><br>
+                            每个数据块转换为可听见的音频波形<br>
+                            <code>CHUNK:::0:::base64data...</code>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-number">4</div>
+                        <div class="flow-desc">
+                            <strong>扬声器播放</strong><br>
+                            通过扬声器播放编码后的音频信号
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-number">5</div>
+                        <div class="flow-desc">
+                            <strong>麦克风接收</strong><br>
+                            接收端麦克风捕获音频信号
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-number">6</div>
+                        <div class="flow-desc">
+                            <strong>音频解码</strong><br>
+                            ggwave 将音频解码回原始数据块
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-number">7</div>
+                        <div class="flow-desc">
+                            <strong>数据重组</strong><br>
+                            按顺序重组所有数据块,还原原始文件
+                        </div>
+                    </div>
+                </div>
+
+                <h3>技术参数</h3>
+                <table class="specs-table">
+                    <tr>
+                        <td><strong>最大文件大小</strong></td>
+                        <td>100 KB</td>
+                    </tr>
+                    <tr>
+                        <td><strong>数据块大小</strong></td>
+                        <td>128 字节 (已优化)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>音频采样率</strong></td>
+                        <td>48000 Hz</td>
+                    </tr>
+                    <tr>
+                        <td><strong>传输协议</strong></td>
+                        <td>GGWAVE_PROTOCOL_AUDIBLE_FAST</td>
+                    </tr>
+                    <tr>
+                        <td><strong>块间延迟</strong></td>
+                        <td>0.8 秒 (已优化)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>预估传输速度</strong></td>
+                        <td>100 KB 约需 1-1.5 分钟 (已优化)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>最佳传输距离</strong></td>
+                        <td>1-2 米</td>
+                    </tr>
+                </table>
+
+                <h3>使用建议</h3>
+                <ul>
+                    <li>在安静的环境中使用,减少噪音干扰</li>
+                    <li>设备距离保持在 1-2 米之间</li>
+                    <li>调整合适的音量 (不要太小也不要太大)</li>
+                    <li>传输过程中避免移动设备</li>
+                    <li>建议使用 Chrome 或 Edge 浏览器</li>
+                    <li>需要在 HTTPS 或 localhost 环境下使用</li>
+                </ul>
+
+                <h3>浏览器兼容性</h3>
+                <p>需要浏览器支持以下特性:</p>
+                <ul>
+                    <li>Web Audio API</li>
+                    <li>MediaDevices API (getUserMedia)</li>
+                    <li>FileReader API</li>
+                </ul>
+                <p><strong>推荐浏览器:</strong> Chrome 60+, Edge 79+, Firefox 55+, Safari 11+</p>
+
+                <h3>开源项目</h3>
+                <p>本项目基于 <a href="https://github.com/ggerganov/ggwave" target="_blank">ggwave</a> 开源库构建。</p>
             </div>
         </div>
     </div>

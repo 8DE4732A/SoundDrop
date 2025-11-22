@@ -15,7 +15,9 @@ let waveformCtx = null;
 
 // 文件传输配置
 const MAX_FILE_SIZE = 100 * 1024; // 100KB
-const CHUNK_SIZE = 64; // 每个数据包的字节数
+const CHUNK_SIZE = 128; // 每个数据包的字节数 (增加到128以减少传输次数)
+const CHUNK_DELAY = 800; // 块间延迟(毫秒) - 从1500ms减少到800ms
+const HEADER_DELAY = 1200; // 头部后延迟(毫秒) - 从2000ms减少到1200ms
 const HEADER_DELIMITER = '|||';
 const CHUNK_DELIMITER = ':::';
 
@@ -124,7 +126,7 @@ async function sendFile(file) {
 
         // 发送文件头
         await sendChunk(headerStr, true);
-        await sleep(2000);
+        await sleep(HEADER_DELAY);
 
         // 分块发送文件数据
         const totalChunks = header.chunks;
@@ -143,7 +145,7 @@ async function sendFile(file) {
             updateSendProgress(`发送中 (${i + 1}/${totalChunks})`, progress);
 
             // 块之间延迟，确保传输可靠
-            await sleep(1500);
+            await sleep(CHUNK_DELAY);
         }
 
         updateSendProgress('发送完成!', 100);

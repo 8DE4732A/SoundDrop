@@ -18,9 +18,11 @@ body {
     background: white;
     border-radius: 16px;
     padding: 40px;
-    max-width: 500px;
+    max-width: 600px;
     width: 100%;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    max-height: 90vh;
+    overflow-y: auto;
 }
 
 h1 {
@@ -293,6 +295,130 @@ h1 {
     border-radius: 8px;
 }
 
+/* 项目说明页面样式 */
+.about-content {
+    color: #333;
+    line-height: 1.6;
+}
+
+.about-content h2 {
+    color: #667eea;
+    margin-bottom: 15px;
+    font-size: 24px;
+}
+
+.about-content h3 {
+    color: #764ba2;
+    margin-top: 25px;
+    margin-bottom: 12px;
+    font-size: 18px;
+}
+
+.about-content p {
+    margin-bottom: 15px;
+}
+
+.about-content ul {
+    margin-left: 20px;
+    margin-bottom: 15px;
+}
+
+.about-content li {
+    margin-bottom: 8px;
+}
+
+.about-content code {
+    background: #f0f0f0;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 13px;
+    color: #d63384;
+}
+
+.about-content a {
+    color: #667eea;
+    text-decoration: none;
+}
+
+.about-content a:hover {
+    text-decoration: underline;
+}
+
+/* 传输流程图 */
+.flow-diagram {
+    margin: 20px 0;
+}
+
+.flow-step {
+    display: flex;
+    align-items: flex-start;
+    margin-bottom: 15px;
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    transition: all 0.3s;
+}
+
+.flow-step:hover {
+    background: #e9ecef;
+    transform: translateX(5px);
+}
+
+.flow-number {
+    min-width: 32px;
+    height: 32px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    margin-right: 15px;
+    font-size: 14px;
+}
+
+.flow-desc {
+    flex: 1;
+    font-size: 14px;
+}
+
+.flow-desc strong {
+    color: #667eea;
+    display: block;
+    margin-bottom: 4px;
+}
+
+/* 技术参数表格 */
+.specs-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 15px 0;
+}
+
+.specs-table tr {
+    border-bottom: 1px solid #e9ecef;
+}
+
+.specs-table tr:last-child {
+    border-bottom: none;
+}
+
+.specs-table td {
+    padding: 12px 8px;
+}
+
+.specs-table td:first-child {
+    width: 50%;
+    color: #666;
+}
+
+.specs-table td:last-child {
+    color: #333;
+    font-weight: 500;
+}
+
 @media (max-width: 600px) {
     .container {
         padding: 30px 20px;
@@ -304,5 +430,22 @@ h1 {
 
     .file-label {
         padding: 30px;
+    }
+
+    .about-content h2 {
+        font-size: 20px;
+    }
+
+    .about-content h3 {
+        font-size: 16px;
+    }
+
+    .flow-desc {
+        font-size: 13px;
+    }
+
+    .specs-table td {
+        padding: 10px 5px;
+        font-size: 14px;
     }
 }
