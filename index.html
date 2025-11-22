@@ -5,90 +5,83 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SoundDrop - 声音传输文件</title>
     <link rel="stylesheet" href="style.css">
-    <script type="text/javascript" src="quiet.js"></script>
-    <script async type="text/javascript" src="quiet-emscripten.js"></script>
 </head>
 <body>
-    <div class="hidden" data-quiet-profile-name="audible"></div>
-
     <div class="container">
-        <header>
-            <h1>🔊 SoundDrop</h1>
-            <p>通过声音传输文件 (最大 100KB)</p>
-        </header>
+        <h1>SoundDrop</h1>
+        <p class="subtitle">通过声音传输文件 (最大 100KB)</p>
 
         <div class="tabs">
-            <button class="tab-btn active" data-tab="send">发送文件</button>
-            <button class="tab-btn" data-tab="receive">接收文件</button>
+            <button class="tab active" data-tab="send">发送文件</button>
+            <button class="tab" data-tab="receive">接收文件</button>
         </div>
 
-        <!-- 发送文件面板 -->
-        <div class="tab-content active" id="send">
-            <div class="upload-area">
-                <input type="file" id="fileInput" accept="*/*">
-                <label for="fileInput" class="file-label">
-                    <span class="upload-icon">📁</span>
-                    <span class="upload-text">点击选择文件</span>
-                    <span class="upload-hint">最大 100KB</span>
+        <!-- 发送面板 -->
+        <div id="send-panel" class="panel active">
+            <div class="file-input-area">
+                <input type="file" id="file-input" accept="*/*">
+                <label for="file-input" class="file-label">
+                    <span class="icon">📁</span>
+                    <span>选择文件</span>
                 </label>
             </div>
 
-            <div class="file-info hidden" id="fileInfo">
+            <div id="file-info" class="file-info hidden">
                 <div class="info-item">
-                    <strong>文件名:</strong> <span id="fileName"></span>
+                    <strong>文件名:</strong> <span id="file-name"></span>
                 </div>
                 <div class="info-item">
-                    <strong>大小:</strong> <span id="fileSize"></span>
+                    <strong>大小:</strong> <span id="file-size"></span>
                 </div>
                 <div class="info-item">
-                    <strong>类型:</strong> <span id="fileType"></span>
+                    <strong>类型:</strong> <span id="file-type"></span>
                 </div>
             </div>
 
-            <button class="btn btn-primary hidden" id="sendBtn">
-                <span class="btn-text">开始传输</span>
-            </button>
+            <button id="send-btn" class="btn btn-primary hidden">开始发送</button>
 
-            <div class="progress-container hidden" id="sendProgress">
+            <div id="send-progress" class="progress-area hidden">
                 <div class="progress-bar">
-                    <div class="progress-fill" id="sendProgressBar"></div>
+                    <div id="send-progress-fill" class="progress-fill"></div>
                 </div>
-                <div class="progress-text" id="sendProgressText">准备中...</div>
+                <div class="progress-text">
+                    <span id="send-status">准备中...</span>
+                    <span id="send-percent">0%</span>
+                </div>
             </div>
         </div>
 
-        <!-- 接收文件面板 -->
-        <div class="tab-content" id="receive">
-            <div class="receiver-status">
-                <div class="status-icon">🎤</div>
-                <div class="status-text" id="receiverStatus">等待接收文件...</div>
-                <div style="margin-top: 10px; font-size: 12px; color: #666;" id="debugInfo">
-                    调试信息：请打开浏览器控制台查看详细日志
-                </div>
+        <!-- 接收面板 -->
+        <div id="receive-panel" class="panel">
+            <button id="receive-btn" class="btn btn-primary">开始监听</button>
+            <button id="stop-receive-btn" class="btn btn-secondary hidden">停止监听</button>
+
+            <div id="receive-status" class="status-area">
+                <div class="status-text">等待开始...</div>
             </div>
 
-            <div class="progress-container hidden" id="receiveProgress">
+            <div id="receive-progress" class="progress-area hidden">
                 <div class="progress-bar">
-                    <div class="progress-fill" id="receiveProgressBar"></div>
+                    <div id="receive-progress-fill" class="progress-fill"></div>
                 </div>
-                <div class="progress-text" id="receiveProgressText">接收中...</div>
+                <div class="progress-text">
+                    <span id="receive-status-text">接收中...</span>
+                    <span id="receive-percent">0%</span>
+                </div>
             </div>
 
-            <div class="received-file hidden" id="receivedFile">
-                <div class="file-preview">
-                    <div class="preview-icon">📄</div>
-                    <div class="preview-info">
-                        <div class="preview-name" id="receivedFileName"></div>
-                        <div class="preview-size" id="receivedFileSize"></div>
-                    </div>
+            <div id="received-file" class="received-file hidden">
+                <div class="success-icon">✓</div>
+                <div class="received-info">
+                    <div><strong>文件名:</strong> <span id="received-name"></span></div>
+                    <div><strong>大小:</strong> <span id="received-size"></span></div>
                 </div>
-                <button class="btn btn-success" id="downloadBtn">下载文件</button>
+                <button id="download-btn" class="btn btn-success">下载文件</button>
             </div>
         </div>
-
-        <div class="warning hidden" id="warning"></div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/ggwave@0.4.0/ggwave.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

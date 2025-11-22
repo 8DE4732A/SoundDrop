@@ -1,470 +1,408 @@
-(function() {
-    'use strict';
+// 全局变量
+let ggwave = null;
+let ggwaveInstance = null;
+let audioContext = null;
+let selectedFile = null;
+let receivedData = null;
+let isReceiving = false;
+let mediaStream = null;
 
-    // 常量定义
-    const MAX_FILE_SIZE = 100 * 1024; // 100KB
-    const CHUNK_SIZE = 4096; // 每个数据块 4KB
-    const PACKET_TYPE = {
-        METADATA: 0,
-        DATA: 1,
-        END: 2
-    };
+// 文件传输配置
+const MAX_FILE_SIZE = 100 * 1024; // 100KB
+const CHUNK_SIZE = 64; // 每个数据包的字节数
+const HEADER_DELIMITER = '|||';
+const CHUNK_DELIMITER = ':::';
 
-    // 初始化 Quiet.js
-    Quiet.init({
-        profilesPrefix: "/",
-        memoryInitializerPrefix: "/",
-        libfecPrefix: "/"
+// 初始化
+async function init() {
+    try {
+        // 等待 GGWave 模块加载
+        if (typeof ggwave_factory === 'undefined') {
+            throw new Error('GGWave library not loaded');
+        }
+
+        // 加载 ggwave 模块
+        ggwave = await ggwave_factory();
+
+        // 创建 AudioContext，推荐使用 48000 采样率
+        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+
+        // 初始化 ggwave 实例
+        const parameters = ggwave.getDefaultParameters();
+        parameters.sampleRateInp = audioContext.sampleRate;
+        parameters.sampleRateOut = audioContext.sampleRate;
+        ggwaveInstance = ggwave.init(parameters);
+
+        console.log('GGWave initialized successfully');
+        console.log('Sample rate:', audioContext.sampleRate);
+    } catch (error) {
+        console.error('Failed to initialize:', error);
+        alert('初始化失败: ' + error.message + '\n请刷新页面重试');
+    }
+}
+
+// 标签页切换
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        const targetTab = tab.dataset.tab;
+
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+
+        tab.classList.add('active');
+        document.getElementById(`${targetTab}-panel`).classList.add('active');
+
+        // 切换到发送面板时停止接收
+        if (targetTab === 'send' && isReceiving) {
+            stopReceiving();
+        }
     });
+});
 
-    // 全局变量
-    let transmitter = null;
-    let receiver = null;
-    let selectedFile = null;
-    let receivedChunks = [];
-    let fileMetadata = null;
-    let totalChunks = 0;
-    let receivedChunkCount = 0;
+// 文件选择处理
+document.getElementById('file-input').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-    // DOM 元素
-    const elements = {
-        tabs: document.querySelectorAll('.tab-btn'),
-        tabContents: document.querySelectorAll('.tab-content'),
-        fileInput: document.getElementById('fileInput'),
-        fileInfo: document.getElementById('fileInfo'),
-        fileName: document.getElementById('fileName'),
-        fileSize: document.getElementById('fileSize'),
-        fileType: document.getElementById('fileType'),
-        sendBtn: document.getElementById('sendBtn'),
-        sendProgress: document.getElementById('sendProgress'),
-        sendProgressBar: document.getElementById('sendProgressBar'),
-        sendProgressText: document.getElementById('sendProgressText'),
-        receiverStatus: document.getElementById('receiverStatus'),
-        receiveProgress: document.getElementById('receiveProgress'),
-        receiveProgressBar: document.getElementById('receiveProgressBar'),
-        receiveProgressText: document.getElementById('receiveProgressText'),
-        receivedFile: document.getElementById('receivedFile'),
-        receivedFileName: document.getElementById('receivedFileName'),
-        receivedFileSize: document.getElementById('receivedFileSize'),
-        downloadBtn: document.getElementById('downloadBtn'),
-        warning: document.getElementById('warning'),
-        debugInfo: document.getElementById('debugInfo')
+    if (file.size > MAX_FILE_SIZE) {
+        alert(`文件大小超过限制 (最大 ${MAX_FILE_SIZE / 1024}KB)`);
+        e.target.value = '';
+        return;
+    }
+
+    selectedFile = file;
+
+    // 显示文件信息
+    document.getElementById('file-name').textContent = file.name;
+    document.getElementById('file-size').textContent = formatFileSize(file.size);
+    document.getElementById('file-type').textContent = file.type || '未知';
+    document.getElementById('file-info').classList.remove('hidden');
+    document.getElementById('send-btn').classList.remove('hidden');
+});
+
+// 发送文件
+document.getElementById('send-btn').addEventListener('click', async () => {
+    if (!selectedFile) return;
+
+    document.getElementById('send-btn').disabled = true;
+    document.getElementById('send-progress').classList.remove('hidden');
+
+    try {
+        await sendFile(selectedFile);
+    } catch (error) {
+        console.error('Send error:', error);
+        alert('发送失败: ' + error.message);
+    } finally {
+        document.getElementById('send-btn').disabled = false;
+    }
+});
+
+// 发送文件主函数
+async function sendFile(file) {
+    const reader = new FileReader();
+
+    reader.onload = async (e) => {
+        const arrayBuffer = e.target.result;
+        const uint8Array = new Uint8Array(arrayBuffer);
+
+        // 创建文件头信息
+        const header = {
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            chunks: Math.ceil(uint8Array.length / CHUNK_SIZE)
+        };
+
+        const headerStr = JSON.stringify(header);
+        updateSendProgress('发送文件信息...', 0);
+
+        // 发送文件头
+        await sendChunk(headerStr, true);
+        await sleep(2000);
+
+        // 分块发送文件数据
+        const totalChunks = header.chunks;
+        for (let i = 0; i < totalChunks; i++) {
+            const start = i * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, uint8Array.length);
+            const chunk = uint8Array.slice(start, end);
+
+            // 转换为 base64
+            const base64Chunk = btoa(String.fromCharCode.apply(null, chunk));
+            const chunkData = `${i}${CHUNK_DELIMITER}${base64Chunk}`;
+
+            await sendChunk(chunkData, false);
+
+            const progress = ((i + 1) / totalChunks) * 100;
+            updateSendProgress(`发送中 (${i + 1}/${totalChunks})`, progress);
+
+            // 块之间延迟，确保传输可靠
+            await sleep(1500);
+        }
+
+        updateSendProgress('发送完成!', 100);
+        setTimeout(() => {
+            document.getElementById('send-progress').classList.add('hidden');
+            resetSendForm();
+        }, 2000);
     };
 
-    // 工具函数
-    function formatFileSize(bytes) {
-        if (bytes < 1024) return bytes + ' B';
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
-        return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
-    }
+    reader.readAsArrayBuffer(file);
+}
 
-    function showWarning(message) {
-        elements.warning.textContent = message;
-        elements.warning.classList.remove('hidden');
-        setTimeout(() => {
-            elements.warning.classList.add('hidden');
-        }, 5000);
-    }
+// 发送单个数据块
+async function sendChunk(data, isHeader) {
+    const prefix = isHeader ? 'HEADER' : 'CHUNK';
+    const message = `${prefix}${HEADER_DELIMITER}${data}`;
 
-    function showElement(element) {
-        element.classList.remove('hidden');
-    }
+    // 使用 ggwave 编码文本为音频
+    // 参数: instance, text, protocolId, volume
+    const waveform = ggwave.encode(
+        ggwaveInstance,
+        message,
+        ggwave.ProtocolId.GGWAVE_PROTOCOL_AUDIBLE_FAST,
+        10
+    );
 
-    function hideElement(element) {
-        element.classList.add('hidden');
-    }
+    // 转换为 Float32Array
+    const floatWaveform = convertTypedArray(waveform, Float32Array);
 
-    // 标签页切换
-    elements.tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            const tabName = tab.getAttribute('data-tab');
+    // 播放音频
+    await playAudio(floatWaveform);
+}
 
-            // 更新标签按钮状态
-            elements.tabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
+// 类型数组转换辅助函数
+function convertTypedArray(src, type) {
+    const buffer = new ArrayBuffer(src.byteLength);
+    new src.constructor(buffer).set(src);
+    return new type(buffer);
+}
 
-            // 更新内容显示
-            elements.tabContents.forEach(content => {
-                if (content.id === tabName) {
-                    content.classList.add('active');
-                } else {
-                    content.classList.remove('active');
-                }
-            });
+// 播放音频
+function playAudio(waveform) {
+    return new Promise((resolve) => {
+        const buffer = audioContext.createBuffer(1, waveform.length, audioContext.sampleRate);
+        const channelData = buffer.getChannelData(0);
+        channelData.set(waveform);
 
-            // 切换到接收模式时启动接收器
-            if (tabName === 'receive' && !receiver) {
-                initReceiver();
+        const source = audioContext.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioContext.destination);
+
+        source.onended = () => resolve();
+        source.start();
+    });
+}
+
+// 开始接收
+document.getElementById('receive-btn').addEventListener('click', async () => {
+    await startReceiving();
+});
+
+// 停止接收
+document.getElementById('stop-receive-btn').addEventListener('click', () => {
+    stopReceiving();
+});
+
+// 开始接收函数
+async function startReceiving() {
+    try {
+        // 请求麦克风权限，禁用回声消除等
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                echoCancellation: false,
+                autoGainControl: false,
+                noiseSuppression: false
             }
         });
-    });
 
-    // 文件选择处理
-    elements.fileInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+        isReceiving = true;
+        receivedData = {
+            header: null,
+            chunks: []
+        };
 
-        // 验证文件大小
-        if (file.size > MAX_FILE_SIZE) {
-            showWarning(`文件大小超过限制！最大允许 ${formatFileSize(MAX_FILE_SIZE)}`);
-            e.target.value = '';
-            return;
+        document.getElementById('receive-btn').classList.add('hidden');
+        document.getElementById('stop-receive-btn').classList.remove('hidden');
+        document.getElementById('receive-status').querySelector('.status-text').textContent = '正在监听...';
+        document.getElementById('received-file').classList.add('hidden');
+
+        // 创建音频处理节点
+        const source = audioContext.createMediaStreamSource(mediaStream);
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        processor.onaudioprocess = (e) => {
+            if (!isReceiving) return;
+
+            const inputData = e.inputBuffer.getChannelData(0);
+
+            // 转换为 Int8Array 进行解码
+            const int8Data = convertTypedArray(new Float32Array(inputData), Int8Array);
+            const res = ggwave.decode(ggwaveInstance, int8Data);
+
+            if (res && res.length > 0) {
+                // 解码结果转为字符串
+                const decoded = new TextDecoder("utf-8").decode(res);
+                handleReceivedData(decoded);
+            }
+        };
+
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+
+        // 保存引用以便清理
+        window.audioProcessor = processor;
+        window.audioSource = source;
+
+    } catch (error) {
+        console.error('Failed to start receiving:', error);
+        alert('无法访问麦克风: ' + error.message);
+        stopReceiving();
+    }
+}
+
+// 停止接收函数
+function stopReceiving() {
+    isReceiving = false;
+
+    if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+        mediaStream = null;
+    }
+
+    if (window.audioProcessor) {
+        window.audioProcessor.disconnect();
+        window.audioProcessor = null;
+    }
+
+    if (window.audioSource) {
+        window.audioSource.disconnect();
+        window.audioSource = null;
+    }
+
+    document.getElementById('receive-btn').classList.remove('hidden');
+    document.getElementById('stop-receive-btn').classList.add('hidden');
+    document.getElementById('receive-status').querySelector('.status-text').textContent = '已停止监听';
+    document.getElementById('receive-progress').classList.add('hidden');
+}
+
+// 处理接收到的数据
+function handleReceivedData(message) {
+    try {
+        // message 已经是解码后的字符串
+        if (!message) return;
+
+        if (message.startsWith('HEADER' + HEADER_DELIMITER)) {
+            // 接收文件头
+            const headerJson = message.substring(('HEADER' + HEADER_DELIMITER).length);
+            receivedData.header = JSON.parse(headerJson);
+            receivedData.chunks = new Array(receivedData.header.chunks).fill(null);
+
+            document.getElementById('receive-progress').classList.remove('hidden');
+            updateReceiveProgress(`接收文件: ${receivedData.header.name}`, 0);
+
+            console.log('Received header:', receivedData.header);
+
+        } else if (message.startsWith('CHUNK' + HEADER_DELIMITER)) {
+            // 接收文件块
+            if (!receivedData.header) return;
+
+            const chunkData = message.substring(('CHUNK' + HEADER_DELIMITER).length);
+            const [indexStr, base64Data] = chunkData.split(CHUNK_DELIMITER);
+            const index = parseInt(indexStr);
+
+            receivedData.chunks[index] = base64Data;
+
+            // 计算进度
+            const receivedCount = receivedData.chunks.filter(c => c !== null).length;
+            const progress = (receivedCount / receivedData.header.chunks) * 100;
+            updateReceiveProgress(`接收中 (${receivedCount}/${receivedData.header.chunks})`, progress);
+
+            console.log(`Received chunk ${index}, progress: ${progress.toFixed(1)}%`);
+
+            // 检查是否接收完成
+            if (receivedCount === receivedData.header.chunks) {
+                completeReceive();
+            }
+        }
+    } catch (error) {
+        console.error('Error handling received data:', error);
+    }
+}
+
+// 完成接收
+function completeReceive() {
+    try {
+        // 合并所有块
+        const base64Complete = receivedData.chunks.join('');
+        const binaryString = atob(base64Complete);
+        const bytes = new Uint8Array(binaryString.length);
+
+        for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
         }
 
-        selectedFile = file;
-
-        // 显示文件信息
-        elements.fileName.textContent = file.name;
-        elements.fileSize.textContent = formatFileSize(file.size);
-        elements.fileType.textContent = file.type || '未知';
-
-        showElement(elements.fileInfo);
-        showElement(elements.sendBtn);
-    });
-
-    // 发送文件
-    elements.sendBtn.addEventListener('click', async () => {
-        if (!selectedFile) return;
-
-        elements.sendBtn.disabled = true;
-        showElement(elements.sendProgress);
-
-        try {
-            const arrayBuffer = await selectedFile.arrayBuffer();
-            await sendFile(selectedFile.name, selectedFile.type, arrayBuffer);
-        } catch (error) {
-            console.error('发送失败:', error);
-            showWarning('发送失败，请重试');
-            elements.sendBtn.disabled = false;
-            hideElement(elements.sendProgress);
-        }
-    });
-
-    // 下载接收到的文件
-    elements.downloadBtn.addEventListener('click', () => {
-        if (!fileMetadata || receivedChunks.length === 0) return;
-
-        // 重组文件数据
-        const blob = new Blob(receivedChunks, { type: fileMetadata.type });
+        // 创建 Blob
+        const blob = new Blob([bytes], { type: receivedData.header.type });
         const url = URL.createObjectURL(blob);
 
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileMetadata.name;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    });
+        // 显示接收完成界面
+        stopReceiving();
+        document.getElementById('receive-progress').classList.add('hidden');
+        document.getElementById('received-file').classList.remove('hidden');
+        document.getElementById('received-name').textContent = receivedData.header.name;
+        document.getElementById('received-size').textContent = formatFileSize(receivedData.header.size);
 
-    // 发送文件函数
-    async function sendFile(fileName, fileType, arrayBuffer) {
-        if (!transmitter) {
-            await initTransmitter();
-        }
-
-        const chunks = [];
-        let offset = 0;
-
-        // 分块
-        while (offset < arrayBuffer.byteLength) {
-            const chunk = arrayBuffer.slice(offset, offset + CHUNK_SIZE);
-            chunks.push(chunk);
-            offset += CHUNK_SIZE;
-        }
-
-        totalChunks = chunks.length;
-
-        // 发送元数据
-        const metadata = {
-            type: PACKET_TYPE.METADATA,
-            name: fileName,
-            fileType: fileType,
-            size: arrayBuffer.byteLength,
-            chunks: totalChunks
+        // 设置下载按钮
+        const downloadBtn = document.getElementById('download-btn');
+        downloadBtn.onclick = () => {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = receivedData.header.name;
+            a.click();
         };
 
-        console.log('发送元数据:', metadata);
-        elements.sendProgressText.textContent = '正在发送文件信息...';
-        await sendPacket(metadata);
-        console.log('元数据已发送');
-        await sleep(2000); // 给接收方足够时间处理元数据
+        console.log('File received successfully!');
 
-        // 发送数据块
-        for (let i = 0; i < chunks.length; i++) {
-            const packet = {
-                type: PACKET_TYPE.DATA,
-                index: i,
-                data: chunks[i]
-            };
-
-            const progress = ((i + 1) / totalChunks * 100).toFixed(0);
-            elements.sendProgressBar.style.width = progress + '%';
-            elements.sendProgressText.textContent = `发送中... ${i + 1}/${totalChunks} (${progress}%)`;
-
-            await sendPacket(packet);
-            await sleep(200); // 给接收方足够时间处理每个数据块
-        }
-
-        // 发送结束标记
-        const endPacket = { type: PACKET_TYPE.END };
-        await sendPacket(endPacket);
-
-        elements.sendProgressText.textContent = '发送完成！';
-        setTimeout(() => {
-            elements.sendBtn.disabled = false;
-            hideElement(elements.sendProgress);
-            elements.sendProgressBar.style.width = '0%';
-        }, 2000);
+    } catch (error) {
+        console.error('Error completing receive:', error);
+        alert('文件接收失败: ' + error.message);
     }
+}
 
-    function sendPacket(packet) {
-        return new Promise((resolve, reject) => {
-            try {
-                const json = JSON.stringify(packet);
+// 更新发送进度
+function updateSendProgress(status, percent) {
+    document.getElementById('send-status').textContent = status;
+    document.getElementById('send-percent').textContent = `${Math.round(percent)}%`;
+    document.getElementById('send-progress-fill').style.width = `${percent}%`;
+}
 
-                // 如果有数据块，需要特殊处理
-                if (packet.type === PACKET_TYPE.DATA) {
-                    const header = JSON.stringify({
-                        type: packet.type,
-                        index: packet.index
-                    });
+// 更新接收进度
+function updateReceiveProgress(status, percent) {
+    document.getElementById('receive-status-text').textContent = status;
+    document.getElementById('receive-percent').textContent = `${Math.round(percent)}%`;
+    document.getElementById('receive-progress-fill').style.width = `${percent}%`;
+}
 
-                    // 创建一个包含 header 和 data 的 ArrayBuffer
-                    const headerBytes = new TextEncoder().encode(header + '|');
-                    const combined = new Uint8Array(headerBytes.length + packet.data.byteLength);
-                    combined.set(headerBytes, 0);
-                    combined.set(new Uint8Array(packet.data), headerBytes.length);
+// 重置发送表单
+function resetSendForm() {
+    selectedFile = null;
+    document.getElementById('file-input').value = '';
+    document.getElementById('file-info').classList.add('hidden');
+    document.getElementById('send-btn').classList.add('hidden');
+}
 
-                    console.log(`发送数据块 ${packet.index}, 大小: ${combined.buffer.byteLength} 字节`);
-                    transmitter.transmit(combined.buffer, resolve);
-                } else {
-                    console.log('发送数据包类型:', packet.type === PACKET_TYPE.METADATA ? 'METADATA' : 'END');
-                    transmitter.transmit(Quiet.str2ab(json), resolve);
-                }
-            } catch (error) {
-                console.error('发送数据包失败:', error);
-                reject(error);
-            }
-        });
-    }
+// 格式化文件大小
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+}
 
-    function sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
+// 延迟函数
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 
-    // 初始化发送器
-    function initTransmitter() {
-        return new Promise((resolve, reject) => {
-            console.log('初始化发送器...');
-            const profileName = document.querySelector('[data-quiet-profile-name]').getAttribute('data-quiet-profile-name');
-            console.log('使用配置:', profileName);
-
-            transmitter = Quiet.transmitter({
-                profile: profileName,
-                onFinish: () => {
-                    console.log('发送器传输完成回调');
-                }
-            });
-
-            console.log('发送器已创建');
-            setTimeout(resolve, 500);
-        });
-    }
-
-    // 初始化接收器
-    function initReceiver() {
-        if (receiver) {
-            console.log('接收器已存在，跳过初始化');
-            updateDebugInfo('接收器已运行');
-            return;
-        }
-
-        console.log('=== 开始初始化接收器 ===');
-        updateDebugInfo('正在初始化接收器...');
-
-        const profileName = document.querySelector('[data-quiet-profile-name]').getAttribute('data-quiet-profile-name');
-        console.log('使用配置:', profileName);
-
-        // 检查 Quiet 是否已就绪
-        if (typeof Quiet === 'undefined') {
-            console.error('Quiet.js 未加载！');
-            showWarning('音频库未加载，请刷新页面');
-            updateDebugInfo('错误：Quiet.js 未加载');
-            return;
-        }
-
-        try {
-            receiver = Quiet.receiver({
-                profile: profileName,
-                onReceive: onReceivePacket,
-                onCreateFail: (reason) => {
-                    console.error('!!! 接收器创建失败 !!!');
-                    console.error('失败原因:', reason);
-                    showWarning('无法访问麦克风，请检查权限设置');
-                    elements.receiverStatus.textContent = '麦克风访问失败';
-                    updateDebugInfo('错误：' + reason);
-                },
-                onReceiveFail: (numFails) => {
-                    console.warn('接收失败次数:', numFails);
-                    updateDebugInfo('接收失败 ' + numFails + ' 次');
-                }
-            });
-
-            console.log('✓ 接收器对象已创建:', receiver);
-            console.log('✓ 等待接收数据...');
-            elements.receiverStatus.textContent = '等待接收文件...（麦克风已就绪）';
-            updateDebugInfo('接收器就绪，等待数据...');
-
-            // 定期检查接收器状态
-            let statusCheckCount = 0;
-            setInterval(() => {
-                if (receiver) {
-                    statusCheckCount++;
-                    console.log('[接收器状态] 运行中，等待数据... (检查次数:' + statusCheckCount + ')');
-                    updateDebugInfo('运行中 - 检查 ' + statusCheckCount + ' 次');
-                }
-            }, 10000); // 每10秒输出一次状态
-        } catch (error) {
-            console.error('创建接收器时出错:', error);
-            showWarning('接收器初始化失败: ' + error.message);
-            updateDebugInfo('错误：' + error.message);
-        }
-    }
-
-    // 更新调试信息
-    function updateDebugInfo(message) {
-        if (elements.debugInfo) {
-            const timestamp = new Date().toLocaleTimeString();
-            elements.debugInfo.textContent = `[${timestamp}] ${message}`;
-        }
-    }
-
-    // 接收数据包
-    function onReceivePacket(payload) {
-        console.log('========================================');
-        console.log('!!! 收到数据包 !!!');
-        console.log('数据包大小:', payload.byteLength, '字节');
-        console.log('========================================');
-
-        updateDebugInfo('收到数据包 ' + payload.byteLength + ' 字节');
-
-        try {
-            // 尝试解析为文本
-            const text = Quiet.ab2str(payload);
-            console.log('数据包内容预览:', text.substring(0, 100));
-
-            // 检查是否包含分隔符（数据包）
-            if (text.includes('|') && text.startsWith('{"type":1')) {
-                console.log('检测到数据块包');
-                // 这是一个数据包
-                const separatorIndex = text.indexOf('|');
-                const headerText = text.substring(0, separatorIndex);
-                const header = JSON.parse(headerText);
-
-                // 提取数据部分
-                const headerBytes = new TextEncoder().encode(headerText + '|');
-                const data = payload.slice(headerBytes.length);
-
-                handleDataPacket(header.index, data);
-            } else {
-                // 这是元数据或结束标记
-                const packet = JSON.parse(text);
-                console.log('收到数据包，类型:', packet.type);
-
-                if (packet.type === PACKET_TYPE.METADATA) {
-                    console.log('!!! 收到元数据包 !!!:', packet);
-                    updateDebugInfo('收到文件: ' + packet.name);
-                    handleMetadataPacket(packet);
-                } else if (packet.type === PACKET_TYPE.END) {
-                    console.log('!!! 收到结束包 !!!');
-                    updateDebugInfo('文件接收完成');
-                    handleEndPacket();
-                }
-            }
-        } catch (error) {
-            console.error('解析数据包失败:', error);
-            console.error('原始数据:', payload);
-            updateDebugInfo('解析错误: ' + error.message);
-        }
-    }
-
-    function handleMetadataPacket(packet) {
-        console.log('处理元数据:', packet.name, packet.size, '字节,', packet.chunks, '个数据块');
-        fileMetadata = {
-            name: packet.name,
-            type: packet.fileType,
-            size: packet.size,
-            chunks: packet.chunks
-        };
-
-        receivedChunks = new Array(packet.chunks);
-        receivedChunkCount = 0;
-
-        elements.receiverStatus.textContent = `正在接收: ${packet.name}`;
-        showElement(elements.receiveProgress);
-        hideElement(elements.receivedFile);
-        console.log('已准备接收', packet.chunks, '个数据块');
-    }
-
-    function handleDataPacket(index, data) {
-        if (!fileMetadata) {
-            console.warn('收到数据块但没有元数据，索引:', index);
-            return;
-        }
-
-        receivedChunks[index] = data;
-        receivedChunkCount++;
-
-        console.log(`收到数据块 ${index}, 进度: ${receivedChunkCount}/${fileMetadata.chunks}`);
-
-        const progress = (receivedChunkCount / fileMetadata.chunks * 100).toFixed(0);
-        elements.receiveProgressBar.style.width = progress + '%';
-        elements.receiveProgressText.textContent = `接收中... ${receivedChunkCount}/${fileMetadata.chunks} (${progress}%)`;
-    }
-
-    function handleEndPacket() {
-        if (!fileMetadata) {
-            console.warn('收到结束包但没有元数据');
-            return;
-        }
-
-        console.log('文件接收完成，共', receivedChunkCount, '个数据块');
-        elements.receiveProgressText.textContent = '接收完成！';
-        elements.receivedFileName.textContent = fileMetadata.name;
-        elements.receivedFileSize.textContent = formatFileSize(fileMetadata.size);
-
-        setTimeout(() => {
-            hideElement(elements.receiveProgress);
-            showElement(elements.receivedFile);
-            elements.receiverStatus.textContent = '文件接收成功！';
-        }, 1000);
-    }
-
-    // Quiet.js 就绪回调
-    function onQuietReady() {
-        console.log('========================================');
-        console.log('Quiet.js 已就绪');
-        console.log('========================================');
-
-        // 检查当前是否在接收标签页，如果是则自动初始化接收器
-        const receiveTab = document.getElementById('receive');
-        if (receiveTab && receiveTab.classList.contains('active')) {
-            console.log('当前在接收标签页，自动初始化接收器');
-            setTimeout(initReceiver, 500); // 延迟一下确保 DOM 就绪
-        }
-    }
-
-    function onQuietFail(reason) {
-        console.error('========================================');
-        console.error('Quiet.js 初始化失败:', reason);
-        console.error('========================================');
-        showWarning('音频系统初始化失败: ' + reason);
-    }
-
-    // 页面加载完成后初始化
-    document.addEventListener('DOMContentLoaded', () => {
-        Quiet.addReadyCallback(onQuietReady, onQuietFail);
-    });
-
-})();
+// 页面加载完成后初始化
+window.addEventListener('load', init);
